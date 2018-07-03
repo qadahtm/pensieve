@@ -1,5 +1,7 @@
 import numpy as np
 
+import mp_util
+
 MILLISECONDS_IN_SECOND = 1000.0
 B_IN_MB = 1000000.0
 BITS_IN_BYTE = 8.0
@@ -27,16 +29,35 @@ class Environment:
         self.video_chunk_counter = 0
         self.buffer_size = 0
 
-        # pick a random trace file
-        self.trace_idx = 0
-        self.cooked_time = self.all_cooked_time[self.trace_idx]
-        self.cooked_bw = self.all_cooked_bw[self.trace_idx]
+        if mp_util.MP_ENABLED:
+            # pick a random trace for WiFi
+            self.trace_idx = 0
+            self.cooked_time = self.all_cooked_time['wifi'][self.trace_idx]
+            self.cooked_bw = self.all_cooked_bw['wifi'][self.trace_idx]
 
-        self.mahimahi_start_ptr = 1
-        # randomize the start point of the trace
-        # note: trace file starts with time 0
-        self.mahimahi_ptr = 1
-        self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
+            self.mahimahi_start_ptr = 1
+            self.mahimahi_ptr = 1
+            self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
+
+            # pick a random trace file for LTE
+            self.trace_lte_idx = 0
+            self.cooked_lte_time = self.all_cooked_time['lte'][self.trace_lte_idx]
+            self.cooked_lte_bw = self.all_cooked_bw['lte'][self.trace_lte_idx]
+
+            self.mahimahi_start_lte_ptr = 1
+            self.mahimahi_lte_ptr = 1
+            self.last_mahimahi_lte_time = self.cooked_lte_time[self.mahimahi_lte_ptr - 1]
+        else:
+            # pick a random trace file
+            self.trace_idx = 0
+            self.cooked_time = self.all_cooked_time[self.trace_idx]
+            self.cooked_bw = self.all_cooked_bw[self.trace_idx]
+
+            self.mahimahi_start_ptr = 1
+            # randomize the start point of the trace
+            # note: trace file starts with time 0
+            self.mahimahi_ptr = 1
+            self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
 
         self.video_size = {}  # in bytes
         for bitrate in xrange(BITRATE_LEVELS):
@@ -45,46 +66,137 @@ class Environment:
                 for line in f:
                     self.video_size[bitrate].append(int(line.split()[0]))
 
-    def get_video_chunk(self, quality):
 
-        assert quality >= 0
-        assert quality < BITRATE_LEVELS
+    def get_delay_wifi(self, video_chunk_size, lte_perc):
+        video_chunk_size = video_chunk_size * (1-lte_perc)
 
-        video_chunk_size = self.video_size[quality][self.video_chunk_counter]
-
-        # use the delivery opportunity in mahimahi
         delay = 0.0  # in ms
         video_chunk_counter_sent = 0  # in bytes
 
         while True:  # download video chunk over mahimahi
             throughput = self.cooked_bw[self.mahimahi_ptr] \
                          * B_IN_MB / BITS_IN_BYTE
+
+            # Duraation will change as well
             duration = self.cooked_time[self.mahimahi_ptr] \
                        - self.last_mahimahi_time
 
             packet_payload = throughput * duration * PACKET_PAYLOAD_PORTION
 
             if video_chunk_counter_sent + packet_payload > video_chunk_size:
-
                 fractional_time = (video_chunk_size - video_chunk_counter_sent) / \
                                   throughput / PACKET_PAYLOAD_PORTION
                 delay += fractional_time
                 self.last_mahimahi_time += fractional_time
+                assert (self.last_mahimahi_time <= self.cooked_time[self.mahimahi_ptr])
                 break
 
             video_chunk_counter_sent += packet_payload
             delay += duration
             self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr]
-            self.mahimahi_ptr += 1
 
+            self.mahimahi_ptr += 1
             if self.mahimahi_ptr >= len(self.cooked_bw):
                 # loop back in the beginning
                 # note: trace file starts with time 0
                 self.mahimahi_ptr = 1
                 self.last_mahimahi_time = 0
 
-        delay *= MILLISECONDS_IN_SECOND
-        delay += LINK_RTT
+        delay *= mp_util.MILLISECONDS_IN_SECOND
+        delay += mp_util.WIFI_LINK_RTT
+        return delay
+
+    def get_delay_lte(self, video_chunk_size, lte_perc):
+        video_chunk_size = video_chunk_size * lte_perc
+
+        delay = 0.0  # in ms
+        video_chunk_counter_sent = 0  # in bytes
+
+        while True:  # download video chunk over mahimahi over lte
+            throughput = self.cooked_lte_bw[self.mahimahi_lte_ptr] \
+                         * B_IN_MB / BITS_IN_BYTE
+            duration = self.cooked_lte_time[self.mahimahi_lte_ptr] \
+                       - self.last_mahimahi_lte_time
+
+            packet_payload = throughput * duration * PACKET_PAYLOAD_PORTION
+
+            if video_chunk_counter_sent + packet_payload > video_chunk_size:
+                fractional_time = (video_chunk_size - video_chunk_counter_sent) / \
+                                  throughput / PACKET_PAYLOAD_PORTION
+                delay += fractional_time
+                self.last_mahimahi_lte_time += fractional_time
+                assert (self.last_mahimahi_lte_time <= self.cooked_lte_time[self.mahimahi_lte_ptr])
+                break
+
+            video_chunk_counter_sent += packet_payload
+            delay += duration
+            self.last_mahimahi_lte_time = self.cooked_lte_time[self.mahimahi_lte_ptr]
+
+            self.mahimahi_lte_ptr += 1
+            if self.mahimahi_lte_ptr >= len(self.cooked_lte_bw):
+                # loop back in the beginning
+                # note: trace file starts with time 0
+                self.mahimahi_lte_ptr = 1
+                self.last_mahimahi_lte_time = 0
+
+        delay *= mp_util.MILLISECONDS_IN_SECOND
+        delay += mp_util.LTE_LINK_RTT
+
+        return delay
+
+    # def get_video_chunk(self, quality):
+    def get_video_chunk(self, arg):
+        quality = -1
+        lte_perc = 0.0
+        if mp_util.MP_ENABLED:
+            quality = mp_util.ACTIONS[arg]['q']
+            lte_perc = mp_util.ACTIONS[arg]['lte']
+        else:
+            quality = arg
+
+        # assert quality < BITRATE_LEVELS
+
+        video_chunk_size = self.video_size[quality][self.video_chunk_counter]
+
+        # use the delivery opportunity in mahimahi
+        delay = 0.0  # in ms
+        if not mp_util.MP_ENABLED:
+            video_chunk_counter_sent = 0  # in bytes
+
+            while True:  # download video chunk over mahimahi
+                throughput = self.cooked_bw[self.mahimahi_ptr] \
+                             * B_IN_MB / BITS_IN_BYTE
+                duration = self.cooked_time[self.mahimahi_ptr] \
+                           - self.last_mahimahi_time
+
+                packet_payload = throughput * duration * PACKET_PAYLOAD_PORTION
+
+                if video_chunk_counter_sent + packet_payload > video_chunk_size:
+
+                    fractional_time = (video_chunk_size - video_chunk_counter_sent) / \
+                                      throughput / PACKET_PAYLOAD_PORTION
+                    delay += fractional_time
+                    self.last_mahimahi_time += fractional_time
+                    break
+
+                video_chunk_counter_sent += packet_payload
+                delay += duration
+                self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr]
+                self.mahimahi_ptr += 1
+
+                if self.mahimahi_ptr >= len(self.cooked_bw):
+                    # loop back in the beginning
+                    # note: trace file starts with time 0
+                    self.mahimahi_ptr = 1
+                    self.last_mahimahi_time = 0
+
+            delay *= MILLISECONDS_IN_SECOND
+            delay += LINK_RTT
+
+        else:
+            delay_wifi = self.get_delay_wifi(video_chunk_size, lte_perc)
+            delay_lte = self.get_delay_lte(video_chunk_size, lte_perc)
+            delay = max(delay_wifi, delay_lte)  # in ms
 
         # rebuffer time
         rebuf = np.maximum(delay - self.buffer_size, 0.0)
@@ -121,6 +233,14 @@ class Environment:
                     # note: trace file starts with time 0
                     self.mahimahi_ptr = 1
                     self.last_mahimahi_time = 0
+                if mp_util.MP_ENABLED:
+                    self.last_mahimahi_lte_time = self.cooked_lte_time[self.mahimahi_lte_ptr]
+                    self.mahimahi_lte_ptr += 1
+                    if self.mahimahi_lte_ptr >= len(self.cooked_lte_bw):
+                        # loop back in the beginning
+                        # note: trace file starts with time 0
+                        self.mahimahi_lte_ptr = 1
+                        self.last_mahimahi_lte_time = 0
 
         # the "last buffer size" return to the controller
         # Note: in old version of dash the lowest buffer is 0.
@@ -137,17 +257,38 @@ class Environment:
             self.buffer_size = 0
             self.video_chunk_counter = 0
             
-            self.trace_idx += 1
-            if self.trace_idx >= len(self.all_cooked_time):
-                self.trace_idx = 0            
+            if mp_util.MP_ENABLED:
+                self.trace_idx += 1
+                if self.trace_idx >= len(self.all_cooked_time['wifi']):
+                    self.trace_idx = 0
 
-            self.cooked_time = self.all_cooked_time[self.trace_idx]
-            self.cooked_bw = self.all_cooked_bw[self.trace_idx]
+                self.cooked_time = self.all_cooked_time['wifi'][self.trace_idx]
+                self.cooked_bw = self.all_cooked_bw['wifi'][self.trace_idx]
 
-            # randomize the start point of the video
-            # note: trace file starts with time 0
-            self.mahimahi_ptr = self.mahimahi_start_ptr
-            self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
+                self.trace_lte_idx += 1
+                if self.trace_lte_idx >= len(self.all_cooked_time['lte']):
+                    self.trace_lte_idx = 0
+
+                self.cooked_lte_time = self.all_cooked_time['lte'][self.trace_lte_idx]
+                self.cooked_lte_bw = self.all_cooked_bw['lte'][self.trace_lte_idx]
+
+                self.mahimahi_ptr = self.mahimahi_start_ptr
+                self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
+
+                self.mahimahi_lte_ptr = self.mahimahi_start_lte_ptr
+                self.last_mahimahi_lte_time = self.cooked_lte_time[self.mahimahi_lte_ptr - 1]
+            else:
+                self.trace_idx += 1
+                if self.trace_idx >= len(self.all_cooked_time):
+                    self.trace_idx = 0
+
+                self.cooked_time = self.all_cooked_time[self.trace_idx]
+                self.cooked_bw = self.all_cooked_bw[self.trace_idx]
+
+                # randomize the start point of the video
+                # note: trace file starts with time 0
+                self.mahimahi_ptr = self.mahimahi_start_ptr
+                self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
 
         next_video_chunk_sizes = []
         for i in xrange(BITRATE_LEVELS):

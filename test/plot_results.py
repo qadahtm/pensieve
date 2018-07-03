@@ -1,5 +1,7 @@
 import os
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
@@ -152,6 +154,7 @@ def main():
 	plt.ylabel('total reward')
 	plt.xlabel('trace index')
 	plt.show()
+	fig.savefig('trace_index_total_reward.png')
 
 	# ---- ---- ---- ----
 	# CDF 
@@ -174,6 +177,7 @@ def main():
 	plt.ylabel('CDF')
 	plt.xlabel('total reward')
 	plt.show()
+	fig.savefig('trace_index_total_reward_cdf.png')
 
 
 	# ---- ---- ---- ----
@@ -221,6 +225,7 @@ def main():
 
 			ax.legend(SCHEMES_REW, loc=9, bbox_to_anchor=(0.5, -0.1), ncol=int(np.ceil(len(SCHEMES) / 2.0)))
 			plt.show()
+			fig.savefig('bandwidth_time.png')
 
 
 if __name__ == '__main__':

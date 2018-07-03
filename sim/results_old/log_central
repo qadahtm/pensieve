@@ -1,0 +1,12 @@
+WARNING:tensorflow:From /home/rlproject/tensorflow_py2/lib/python2.7/site-packages/tflearn/initializations.py:119: __init__ (from tensorflow.python.ops.init_ops) is deprecated and will be removed in a future version.
+Instructions for updating:
+Use tf.initializers.variance_scaling instead with distribution=uniform to get equivalent behavior.
+WARNING:tensorflow:From /home/rlproject/pensieve/sim/a3c.py:49: calling reduce_sum (from tensorflow.python.ops.math_ops) with keep_dims is deprecated and will be removed in a future version.
+Instructions for updating:
+keep_dims is deprecated, use keepdims instead
+WARNING:tensorflow:Error encountered when serializing data_augmentation.
+Type is unsupported, or the types of the items don't match field type in CollectionDef.
+'NoneType' object has no attribute 'name'
+WARNING:tensorflow:Error encountered when serializing data_preprocessing.
+Type is unsupported, or the types of the items don't match field type in CollectionDef.
+'NoneType' object has no attribute 'name'
